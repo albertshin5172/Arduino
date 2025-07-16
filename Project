@@ -1,0 +1,248 @@
+#include <Servo.h>
+#include <IRremote.h>
+
+// ----------------------
+// Hardware pin settings
+// ----------------------
+Servo servo1;                         // Servo motor control object
+const int servoPin = 0;              // Servo motor pin (D0)
+const int remotePin = 4;             // IR receiver pin
+const int motorPin = 5;              // DC motor control pin (PWM supported)
+const int rotateLed = 6;             // Rotation indicator LED pin
+
+const int interruptPin1 = 2;         // Fan speed control button (Interrupt pin INT0)
+const int interruptPin2 = 3;         // Rotation control button (Interrupt pin INT1)
+
+// ----------------------
+// System state variables
+// ----------------------
+int step = 0;                        // Current fan speed level (0~3)
+bool swStatus = false;              // Rotation state (true: rotating)
+bool powerOn = true;                // System power state (true: ON, false: OFF)
+int angle = 0;                       // Current servo motor angle
+int addAngle = 10;                  // Servo rotation increment value
+
+unsigned long timeVal = 0;          // Servo rotation timing control
+unsigned long lastExec1Time = 0;    // Last execution time of fan speed button
+unsigned long lastExec2Time = 0;    // Last execution time of rotation button
+const unsigned long debounceDelay = 200;  // Debounce delay (ms)
+
+// ----------------------
+// Seven-segment display
+// ----------------------
+int segValue[4][7] = {
+  {0,0,0,0,0,0,1}, // 0
+  {1,0,0,1,1,1,1}, // 1
+  {0,0,1,0,0,1,0}, // 2
+  {0,0,0,0,1,1,0}  // 3
+};
+const int segPin[7] = {7, 8, 9, 10, 11, 12, 13}; // Segment pins a~g
+
+int rmBtn = 0;  // IR remote control input storage variable
+
+// ----------------------
+// Initialization
+// ----------------------
+void setup() {
+  pinMode(remotePin, INPUT);        // IR receiver power (optional)
+  pinMode(rotateLed, OUTPUT);       // Rotation indicator LED
+  pinMode(motorPin, OUTPUT);        // DC motor output pin
+
+  servo1.attach(servoPin);          // Attach servo pin
+  servo1.write(angle);              // Set initial servo angle
+
+  // Initialize 7-segment display to show level 0
+  for (int i = 0; i < 7; i++) {
+    pinMode(segPin[i], OUTPUT);
+    digitalWrite(segPin[i], segValue[0][i]);
+  }
+
+  // Set button pins as input with pull-ups, and attach interrupts
+  pinMode(interruptPin1, INPUT_PULLUP);
+  pinMode(interruptPin2, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(interruptPin1), fnModFanSpeed_ISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(interruptPin2), fnFanRotate_ISR, FALLING);
+
+  analogWrite(motorPin, 0);         // Stop the DC motor initially
+  IrReceiver.begin(remotePin);      // Initialize IR receiver
+}
+
+// ----------------------
+// Main loop
+// ----------------------
+void loop() {
+  if (powerOn) {
+    // If power is ON, handle rotation routine
+    if (swStatus) {
+      if (millis() - timeVal >= 100) {
+        angle += addAngle;
+
+        if (angle >= 180) addAngle = -10;
+        else if (angle <= 0) addAngle = 10;
+
+        servo1.write(angle);
+        timeVal = millis();
+        digitalWrite(rotateLed, HIGH); // Turn ON rotation LED
+      } else {
+        digitalWrite(rotateLed, LOW);  // Turn OFF rotation LED
+      }
+    }
+  } else {
+    // If power is OFF: turn off LED and stop motor
+    digitalWrite(rotateLed, LOW);
+    analogWrite(motorPin, 0);
+  }
+
+  remote();  // Handle remote input
+}
+
+// ----------------------
+// IR remote input handling
+// ----------------------
+void remote() {
+  rmBtn = readInfrared();          
+  unsigned long now = millis();    
+
+  switch (rmBtn) {
+    case 0: // Power button always works
+      if (now - lastExec1Time > debounceDelay) {
+        togglePower();
+        lastExec1Time = now;
+      }
+      break;
+
+    default:
+      if (!powerOn) return;  // Ignore other buttons if power is OFF
+
+      switch (rmBtn) {
+        case 4: // Decrease fan speed
+          if (now - lastExec1Time > debounceDelay) {
+            if (step > 0) fnRemoteFanSpeed(step - 1);
+            lastExec1Time = now;
+          }
+          break;
+
+        case 6: // Increase fan speed
+          if (now - lastExec1Time > debounceDelay) {
+            if (step < 3) fnRemoteFanSpeed(step + 1);
+            lastExec1Time = now;
+          }
+          break;
+
+        case 5: // Toggle rotation
+          if (now - lastExec2Time > debounceDelay) {
+            fnFanRotate();
+            lastExec2Time = now;
+          }
+          break;
+      }
+      break;
+  }
+
+  delay(10);
+}
+
+// ----------------------
+// Fan speed change via remote
+// ----------------------
+void fnRemoteFanSpeed(int newStep) {
+  if (newStep < 0 || newStep > 3) return; // Ignore out-of-range values
+  step = newStep;
+
+  // Display level on 7-segment LED
+  for (int i = 0; i < 7; i++) {
+    digitalWrite(segPin[i], segValue[step][i]);
+  }
+
+  // Control DC motor speed
+  analogWrite(motorPin, step * 85);  // 0, 85, 170, 255
+}
+
+// ----------------------
+// Fan speed control function (0 → 1 → 2 → 3 → 0 loop)
+// ----------------------
+void fnModFanSpeed() {
+  step = (step + 1) % 4;
+
+  // Display level on 7-segment LED
+  for (int i = 0; i < 7; i++) {
+    digitalWrite(segPin[i], segValue[step][i]);
+  }
+
+  // Control DC motor speed
+  analogWrite(motorPin, step * 85);  // 0, 85, 170, 255
+}
+
+// ----------------------
+// Toggle fan rotation ON/OFF
+// ----------------------
+void fnFanRotate() {
+  swStatus = !swStatus;
+  timeVal = millis();  // Reset rotation timer
+}
+
+// ----------------------
+// Fan speed interrupt routine
+// ----------------------
+void fnModFanSpeed_ISR() {
+  if (millis() - lastExec1Time > debounceDelay) {
+    if (!powerOn){ powerOn = true; step=0; } // Auto power ON if it was OFF
+    fnModFanSpeed();
+    lastExec1Time = millis();
+  }
+}
+
+// ----------------------
+// Rotation interrupt routine
+// ----------------------
+void fnFanRotate_ISR() {
+  if (millis() - lastExec2Time > debounceDelay) {
+    fnFanRotate();
+    lastExec2Time = millis();
+  }
+}
+
+// ----------------------
+// Map IR raw code to button ID
+// ----------------------
+int mapCodeToButton(unsigned long code) {
+  if ((code & 0x0000FFFF) == 0x0000BF00) {
+    code >>= 16;
+    if (((code >> 8) ^ (code & 0x00FF)) == 0x00FF) {
+      return code & 0xFF;
+    }
+  }
+  return -1;
+}
+
+// ----------------------
+// Read IR remote code
+// ----------------------
+int readInfrared() {
+  if (IrReceiver.decode()) {
+    unsigned long code = IrReceiver.decodedIRData.decodedRawData;
+    int btn = mapCodeToButton(code);
+    IrReceiver.resume();  // Ready for the next input
+    return btn;
+  }
+  return -1;
+}
+
+// ----------------------
+// Toggle power ON/OFF
+// ----------------------
+void togglePower() {
+  powerOn = !powerOn;
+
+  if (!powerOn) {
+    // If power OFF: stop motor, servo, 7-segment OFF
+    analogWrite(motorPin, 0);
+    for (int i = 0; i < 7; i++) {
+      digitalWrite(segPin[i], segValue[0][i]);
+    }
+    swStatus = false;
+  } else {
+    // If power ON: restore default (level 1)
+    fnRemoteFanSpeed(1);
+  }
+}
