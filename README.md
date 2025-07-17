@@ -54,14 +54,10 @@ Rotation status LED blinks when active.
 
 IR Remote Control
 Power: ON/OFF toggle.
-
 Wind speed: Increase (≫, button 6), decrease (≪, button 4).
-
 Rotation toggle: (▶, button 5).
-
 Manual Button Control (Interrupt-based)
 Button 1 (D2): Change fan speed step (interrupt).
-
 Button 2 (D3): Toggle rotation mode (interrupt).
 
 4. Core Code & Logic Description
@@ -102,11 +98,18 @@ Rotation indicator LED provides visual feedback.
 
 5. Simulation & Results
 Remote Button Functions
-Button	Function
-Power (0)	Toggle ON/OFF
-≪ (4)	Decrease speed
-≫ (6)	Increase speed
-▶ (5)	Toggle fan rotation
+-----------------------------------
+ Button	  |    Function           |
+-----------------------------------
+Power (0)	|  Toggle ON/OFF        |
+-----------------------------------  
+≪ (4)	  |  Decrease speed       |
+-----------------------------------
+≫ (6)	  |  Increase speed       |
+-----------------------------------
+▶ (5)	  |  Toggle fan rotation  |
+----------------------------------
+
 Results Summary
 Speed and Rotation can be controlled by both button and remote.
 
